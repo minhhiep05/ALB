@@ -1,67 +1,45 @@
-```mermaid
-flowchart TB
-
-    classDef public fill:#e1f5fe,stroke:#03a9f4,stroke-width:2px,color:#01579b
-    classDef private fill:#efebe9,stroke:#8d6e63,stroke-width:2px,color:#3e2723
-    classDef aws fill:#ffe0b2,stroke:#ff9800,stroke-width:2px,color:#e65100
-    classDef services fill:#e8f5e9,stroke:#4caf50,stroke-width:2px,color:#1b5e20
-    classDef client fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px,color:#4a148c
-
-    %% --- Thuc the ngoai AWS ---
-    subgraph ClientSpace ["Khong gian Nguoi dung (Internet)"]
-        direction LR
-        Admin["May dieu khien (Laptop)<br>IP: var.my_ip"]:::client
-        UserBrowser["Nguoi dung cuoi (Web Browser)"]:::client
-        TelegramBot["Telegram Bot Chat"]:::client
+graph TB
+    subgraph Internet["🌐 Internet / Users & Admin"]
+        User(("👤 User / Client"))
+        Admin(("👨‍💻 Admin / DevOps"))
     end
 
-    subgraph AWS ["Dam may AWS (Region: ap-southeast-1)"]
-        direction TB
+    subgraph AWS["☁️ AWS Cloud - VPC (10.0.0.0/16)"]
+        IGW["🌐 Internet Gateway (IGW)"]
 
-        IGW["Internet Gateway"]:::aws
-        NAT["NAT Gateway"]:::aws
-        SecretsManager["AWS Secrets Manager"]:::aws
-        S3DB["Terraform Backend<br>(S3 Bucket & DynamoDB Lock)"]:::aws
+        subgraph PublicSubnet["🔓 Public Subnet (10.0.1.0/24)"]
+            ALB["⚖️ Application Load Balancer (ALB)"]
+            Bastion["🛡️ Bastion Host (EC2)"]
+            Monitor["📊 Monitoring Server (EC2)<br/>(Prometheus + Grafana + Loki)"]
+        end
 
-        subgraph VPC ["VPC: devops-lab2-vpc (10.0.0.0/16)"]
-
-            subgraph PublicSubnet ["Public Subnets (10.0.101.0/24 - ap-southeast-1a)"]
-                direction TB
-                Bastion["Bastion Host (t2.micro)<br>Public IP<br>SG: bastion_sg"]:::public
-                ALB["Application Load Balancer (ALB)<br>Public DNS<br>SG: alb_sg"]:::public
-
-                subgraph MonitoringServer ["EC2 Monitoring Node (t2.medium)"]
-                    Prometheus["Prometheus (Port 9090)"]:::services
-                    Grafana["Grafana (Port 3000)"]:::services
-                    Loki["Loki (Port 3100)"]:::services
-                    Alertmgr["Alertmanager (Port 9093)"]:::services
-                end
+        subgraph PrivateSubnet["🔒 Private Subnet (10.0.2.0/24)"]
+            NAT["🔄 NAT Gateway"]
+            
+            subgraph ASG["📦 Auto Scaling Group (App Cluster)"]
+                App1["🚀 Node.js App 1 (Docker + Promtail)"]
+                App2["🚀 Node.js App 2 (Docker + Promtail)"]
             end
-
-            subgraph PrivateSubnet ["Private Subnets (10.0.1.0/24 & 10.0.2.0/24)"]
-                direction TB
-
-                subgraph JenkinsServer ["EC2 Jenkins Node (t2.micro)"]
-                    Jenkins["Jenkins Server (Port 8080)"]:::services
-                    PromtailJ["Promtail (Logs)"]:::services
-                    ExporterJ["Node Exporter (Metrics)"]:::services
-                end
-
-                subgraph ASG ["Auto Scaling Group (ASG)"]
-                    direction LR
-                    subgraph App1 ["EC2 App Instance 1 (t2.micro)"]
-                        AppCont1["Container sample-app<br>(Port 8080:80)"]:::services
-                        PromtailA1["Promtail"]:::services
-                        ExporterA1["Node Exporter"]:::services
-                    end
-
-                    subgraph App2 ["EC2 App Instance 2 (t2.micro)"]
-                        AppCont2["Container sample-app<br>(Port 8080:80)"]:::services
-                        PromtailA2["Promtail"]:::services
-                        ExporterA2["Node Exporter"]:::services
-                    end
-                end
-            end
+            
+            Jenkins["⚙️ Jenkins Server (CI/CD)"]
         end
     end
-```
+
+    %% Connections
+    Admin -->|1. SSH Tunnel / Port 22| Bastion
+    Bastion -.->|SSH Local Access| Jenkins
+    Bastion -.->|SSH Local Access| App1
+    
+    User -->|2. HTTP/HTTPS Port 80/443| ALB
+    ALB -->|3. Forward Traffic| App1
+    ALB -->|4. Forward Traffic| App2
+
+    App1 -->|5. Outbound Update/Pull Image| NAT
+    App2 -->|Outbound Traffic| NAT
+    Jenkins -->|Outbound Traffic| NAT
+    NAT --> IGW
+
+    Admin -->|6. View Metrics & Logs| Monitor
+    App1 -.->|7. Push Logs & Metrics| Monitor
+    App2 -.->|Push Logs & Metrics| Monitor
+    Jenkins -.->|Deploy Trigger| ASG
